@@ -1,0 +1,63 @@
+pipeline{
+    agent any
+    environment{
+        REGISTRY = "shriram2105"
+        IMG  = "web-app"
+        BUILD_RESULT = "${currentBuild.result}"
+        CURRENT_RESULT = "${currentBuild.currentResult}"
+    }
+    stages{
+        stage('SCM Checkout'){
+            steps{
+                checkout scm
+            }
+        }
+        stage('Build'){
+            steps{
+                sh '''
+                echo "---building Image---"
+                docker build -t "$IMG:$BUILD_NUMBER" .
+                '''
+            }
+        }
+        stage('Tag&Push'){
+            steps{
+                withCredentials([
+                    usernamePassword(
+                        credentialsId : 'DOCKER_CRED',
+                        usernameVariable: 'USR',
+                        passwordVariable: 'PSWD'
+                    )
+                ]){
+                    sh '''
+                    echo "---docker login---"
+                    echo "$PSWD" | docker login -u "$USR" --password-stdin
+                    echo "---tag img---"
+                    docker tag "$IMG:$BUILD_NUMBER" "$REGISTRY/$IMG:$BUILD_NUMBER"
+                    echo "---pushing img---"
+                    docker push "$REGISTRY/$IMG:$BUILD_NUMBER"
+                    '''
+                }
+            }
+        }
+        stage('Deploy'){
+            steps{
+                sh '''
+                for file in config.yaml secret.yaml deploy.yaml svc.yaml ;do kubectl apply -f "$file"; done
+                echo "---status---"
+                for status in deploy pods svc; do kubectl get "$status";done
+                '''
+            }
+        }
+    }
+    post{
+        always{
+            sh '''
+            echo "current build status:$BUILD_RESULT || $CURRENT_RESULT"
+            '''
+        }
+        failure{
+            mail to: 'sshalya42@gmail.com', subject: 'Build fail.'
+        }
+    }
+}
